@@ -6,17 +6,17 @@ using Telegram.Bot.Types;
 
 namespace FCGameBot.Commands
 {
-    internal class PingCommand : ICommand
+    class StatusCommand : ICommand
     {
         public bool Private { get; } = true;
 
         public bool Public { get; } = true;
 
-        public bool Admin { get; } = true;
+        public bool Admin { get; } = false;
 
-        public bool Targetable { get; } = false;
+        public bool Targetable { get; } = true;
 
-        public string[] GetNames() => new[] { "ping" };
+        public string[] GetNames() => new[] { "status" };
 
         public async Task Help(string alias, Queue<string> args, Player player)
         {
@@ -25,7 +25,8 @@ namespace FCGameBot.Commands
 
         public async Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null)
         {
-            await chat.Reply("Pong!");
+            await player.SendMessage($"Credits: {player.Credits.N("💳")}");
+            await player.SendMessage($"Your language code is: {player.LanguageCode}");
         }
     }
 }

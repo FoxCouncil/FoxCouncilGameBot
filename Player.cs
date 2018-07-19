@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using LiteDB;
 using Telegram.Bot.Types;
 
@@ -19,14 +20,43 @@ namespace FCGameBot
 
         public string LanguageCode { get; set; }
 
+        public ushort Actions { get; set; }
+        
+        public DateTime LastAction { get; set; }
+
+        public ulong Experience { get; set; }
+
         public long Credits { get; set; }
+
+        public ulong Health { get; set; }
+
+        public ulong Weight { get; set; }
 
         [BsonIgnore]
         public bool IsAdmin => Config.Data.Admins.Contains(Id);
 
-        public void SendMessage(string msg)
+        public async Task SendMessage(string msg)
         {
-            Game.SendMessage(Id, msg);
+            await Game.SendMessage(Id, msg);
+        }
+
+        public void Save()
+        {
+            Game.Players.Upsert(this);
+        }
+
+        public bool CanConsumeAction()
+        {
+            if (Actions == 0)
+            {
+                return false;
+            }
+
+            Actions--;
+
+            LastAction = DateTime.Now;
+
+            return true;
         }
 
         #region IEquatable<Player>

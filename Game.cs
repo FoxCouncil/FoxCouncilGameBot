@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using LiteDB;
 using Telegram.Bot;
 using Telegram.Bot.Args;
@@ -41,30 +42,25 @@ namespace FCGameBot
             Config.Save();
         }
 
-        public static void SendMessage(ChatId chatId, string message)
+        public static async Task SendMessage(ChatId chatId, string message)
         {
             // Swallow exceptions from Telegram API being unable to message a particular user.
             try
             {
-                var messageTask = Bot.SendTextMessageAsync(chatId, Debugger.IsAttached ? $"[DEV MODE]\n{message}" : message, ParseMode.Markdown);
-
-                // Run the task to send the message and wait for it to finish executing.
-                messageTask.Wait();
-            }
-            catch (ChatNotInitiatedException)
-            {
+                await Bot.SendTextMessageAsync(chatId, message, ParseMode.Markdown);
             }
             catch (Exception)
             {
-                // ignored
+                /* ignored */
             }
         }
 
-        public static void RemoveMessage(Message msg)
+        public static async Task RemoveMessage(Message msg)
         {
+            // Swallow exceptions from Telegram API being unable to remote a message.
             try
             {
-                Bot.DeleteMessageAsync(msg.Chat.Id, msg.MessageId).Wait();
+                await Bot.DeleteMessageAsync(msg.Chat.Id, msg.MessageId);
             }
             catch (Exception)
             {
@@ -108,24 +104,71 @@ namespace FCGameBot
             Me = Bot.GetMeAsync().Result;
 
             Bot.OnUpdate += OnUpdate;
-            Bot.StartReceiving(new [] { UpdateType.Message });
+            Bot.StartReceiving(new [] { UpdateType.Message, UpdateType.EditedMessage });
         }
 
-        private static void OnUpdate(object sender, UpdateEventArgs e)
+        private static async void OnUpdate(object sender, UpdateEventArgs e)
         {
             var update = e.Update;
-            var msg = update.Message;
-            var chat = msg.Chat;
-            var user = msg.From;
 
-            UpdateUserData(user);
-
-            // Only process text messages, not pictures or stickers.
-            if (msg.Type != MessageType.Text)
+            if (update.Type == UpdateType.Message || update.Type == UpdateType.EditedMessage)
             {
-                return;
+                await HandleUpdateMessage(update);
             }
+        }
 
+        private static async Task HandleUpdateMessage(Update update)
+        {
+            var msg = update.Message;
+
+            switch (msg.Type)
+            {
+                case MessageType.Text:
+                {
+                    await HandleMessageText(msg);
+                }
+                break;
+
+                case MessageType.Photo:
+                    break;
+                case MessageType.Audio:
+                    break;
+                case MessageType.Video:
+                    break;
+                case MessageType.Voice:
+                    break;
+                case MessageType.Document:
+                    break;
+                case MessageType.Sticker:
+                    break;
+                case MessageType.Location:
+                    break;
+                case MessageType.Contact:
+                    break;
+                case MessageType.Game:
+                    break;
+                case MessageType.VideoNote:
+                    break;
+
+                case MessageType.ChatMembersAdded:
+                {
+                    await HandleMessageChatMembersAdded(msg);
+                }
+                break;
+
+                case MessageType.ChatTitleChanged:
+                    break;
+                case MessageType.ChatPhotoChanged:
+                    break;
+                case MessageType.MessagePinned:
+                    break;
+                case MessageType.ChatPhotoDeleted:
+                    break;
+            }
+        }
+
+        private static async Task HandleMessageText(Message msg)
+        {
             // Ignore messages that don't start with a slash command.
             if (!msg.Text.StartsWith('/'))
             {
@@ -146,6 +189,7 @@ namespace FCGameBot
                 return;
             }
 
+            var chat = msg.Chat;
             var isCommandPrivate = chat.Type == ChatType.Private;
             var command = CommandHandlers[alias];
 
@@ -154,21 +198,76 @@ namespace FCGameBot
                 return;
             }
 
-            if (!isCommandPrivate && chat.Type != ChatType.Channel)
-            {
-                RemoveMessage(msg);
-            }
-
             //if (msg.ReplyToMessage != null)
             //{
             //    _inReplyToMsgId = msg.ReplyToMessage.MessageId;
             //}
 
+            var user = msg.From;
+
+            UpdateUserData(user);
+
             var player = GetUser(user.Id);
 
-            Bot.SendChatActionAsync(isCommandPrivate ? user.Id : chat.Id, ChatAction.Typing).Wait();
+            if (command.Admin && !player.IsAdmin)
+            {
+                return;
+            }
 
-            command.Process(alias, args, chat, player);
+            Player targetedPlayer = null;
+
+            if (!isCommandPrivate && command.Targetable)
+            {
+                if (args.Count == 0)
+                {
+                    return;
+                }
+
+                targetedPlayer = ParseTarget(ref args);
+
+                if (targetedPlayer == null)
+                {
+                    return;
+                }
+            }
+
+            if (!isCommandPrivate && chat.Type != ChatType.Channel)
+            {
+                await RemoveMessage(msg);
+            }
+
+            await Bot.SendChatActionAsync(isCommandPrivate ? user.Id : chat.Id, ChatAction.Typing);
+
+            await command.Process(alias, args, chat, player, targetedPlayer);
+        }
+
+        private static async Task HandleMessageChatMembersAdded(Message msg)
+        {
+            foreach (var newUser in msg.NewChatMembers)
+            {
+                UpdateUserData(newUser);
+
+                var welcomeText = new StringBuilder();
+
+                welcomeText.AppendLine($"Welcome `@{newUser.Username}` to The Fox Council world!");
+
+                await msg.Chat.Reply(welcomeText.ToString());
+            }
+        }
+
+        private static Player ParseTarget(ref Queue<string> args)
+        {
+            var argsList = args.ToList();
+            var usernameString = argsList.DequeueFirst(x => x.StartsWith('@')).Substring(1).ToLower();
+
+            if (string.IsNullOrWhiteSpace(usernameString))
+            {
+                return null;
+            }
+
+            args = new Queue<string>(argsList);
+
+            return Players.FindOne(x => x.Username.ToLower().Equals(usernameString));
         }
 
         private static void UpdateUserData(User user)
@@ -183,7 +282,11 @@ namespace FCGameBot
                     Firstname = user.FirstName,
                     Lastname = user.LastName,
                     Username = user.Username,
-                    LanguageCode = user.LanguageCode
+                    LanguageCode = user.LanguageCode,
+                    Actions = 10,
+                    Credits = 20000,
+                    Health = 100,
+                    Weight = 75
                 };
             }
             else
