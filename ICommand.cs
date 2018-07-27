@@ -2,7 +2,9 @@
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using Telegram.Bot.Types;
+using User = FCGameBot.Models.User;
 
 namespace FCGameBot
 {
@@ -18,8 +20,8 @@ namespace FCGameBot
 
         string[] GetNames();
 
-        Task Help(string alias, Queue<string> args, Player player);
+        Task Help(string alias, Queue<string> args, Status player);
 
-        Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null);
+        Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null);
     }
 }

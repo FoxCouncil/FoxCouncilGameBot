@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using Telegram.Bot.Types;
+using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,15 +20,15 @@ namespace FCGameBot.Commands
 
         public string[] GetNames() => new[] { "status" };
 
-        public async Task Help(string alias, Queue<string> args, Player player)
+        public async Task Help(string alias, Queue<string> args, Status player)
         {
-            throw new NotImplementedException();
+            await player.SendMessage("Nothing...");
         }
 
-        public async Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null)
+        public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
             await player.SendMessage($"Credits: {player.Credits.N("💳")}");
-            await player.SendMessage($"Your language code is: {player.LanguageCode}");
+            await player.SendMessage($"Your language code is: {player.User.LanguageCode}");
         }
     }
 }

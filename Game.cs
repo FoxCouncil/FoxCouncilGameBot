@@ -2,15 +2,19 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using LiteDB;
 using Telegram.Bot;
 using Telegram.Bot.Args;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using User = FCGameBot.Models.User;
+using TelegramUser = Telegram.Bot.Types.User;
 
 namespace FCGameBot
 {
@@ -24,10 +28,12 @@ namespace FCGameBot
         /// <summary>The database object.</summary>
         public static LiteDatabase Database;
 
-        public static LiteCollection<Player> Players;
+        public static LiteCollection<User> Users;
+        public static LiteCollection<World> Worlds;
+        public static LiteCollection<Status> Statuses;
 
         public static TelegramBotClient Bot;
-        public static User Me;
+        public static TelegramUser BotUser;
 
         public static void Run()
         {
@@ -44,7 +50,7 @@ namespace FCGameBot
 
         public static async Task SendMessage(ChatId chatId, string message)
         {
-            // Swallow exceptions from Telegram API being unable to message a particular user.
+            // Swallow exceptions from Telegram API being unable to telegramUser a particular user.
             try
             {
                 await Bot.SendTextMessageAsync(chatId, message, ParseMode.Markdown);
@@ -57,7 +63,7 @@ namespace FCGameBot
 
         public static async Task RemoveMessage(Message msg)
         {
-            // Swallow exceptions from Telegram API being unable to remote a message.
+            // Swallow exceptions from Telegram API being unable to remote a telegramUser.
             try
             {
                 await Bot.DeleteMessageAsync(msg.Chat.Id, msg.MessageId);
@@ -91,17 +97,29 @@ namespace FCGameBot
 
         private static void InitDatabase()
         {
-            Database = new LiteDatabase("FCGameBot.db");
+            Database = new LiteDatabase(Config.Data.DatabaseFilename);
 
-            // Player Collection
-            Players = Database.GetCollection<Player>("players");
-            Players.EnsureIndex(x => x.Id);
+            // User Collection
+            Users = Database.GetCollection<User>("users");
+            Users.EnsureIndex(x => x.Id);
+            Users.EnsureIndex(x => x.Username);
+
+            // World Collection
+            Worlds = Database.GetCollection<World>("worlds");
+            Worlds.EnsureIndex(x => x.Id);
+
+            Statuses = Database.GetCollection<Status>("statuses");
+            Statuses.EnsureIndex(x => x.User);
+            Statuses.EnsureIndex(x => x.World);
+
+            BsonMapper.Global.Entity<Status>().DbRef(x => x.World, "worlds");
+            BsonMapper.Global.Entity<Status>().DbRef(x => x.User, "users");
         }
 
         private static void InitTelegramBot()
         {
             Bot = new TelegramBotClient(Config.Data.TelegramBotApiKey);
-            Me = Bot.GetMeAsync().Result;
+            BotUser = Bot.GetMeAsync().Result;
 
             Bot.OnUpdate += OnUpdate;
             Bot.StartReceiving(new [] { UpdateType.Message, UpdateType.EditedMessage });
@@ -169,6 +187,14 @@ namespace FCGameBot
 
         private static async Task HandleMessageText(Message msg)
         {
+            var chat = msg.Chat;
+            var isWorldPrivate = chat.Type == ChatType.Private;
+
+            var user = UpdateUserData(msg.From, msg.Chat);
+            var world = isWorldPrivate ? GetWorldById(user.SelectedWorld) : UpdateWorldData(chat);
+
+            world.Chat = chat;
+
             // Ignore messages that don't start with a slash command.
             if (!msg.Text.StartsWith('/'))
             {
@@ -184,46 +210,51 @@ namespace FCGameBot
 
             var alias = args.Dequeue().ToLower();
 
+            if (alias.Equals("help"))
+            {
+                await HandleHelp(msg, args);
+
+                return;
+            }
+
             if (!CommandHandlers.ContainsKey(alias))
             {
                 return;
             }
 
-            var chat = msg.Chat;
-            var isCommandPrivate = chat.Type == ChatType.Private;
             var command = CommandHandlers[alias];
 
-            if ((!isCommandPrivate || !command.Private) && (isCommandPrivate || !command.Public))
+            if ((!isWorldPrivate || !command.Private) && (isWorldPrivate || !command.Public))
             {
                 return;
             }
 
-            //if (msg.ReplyToMessage != null)
-            //{
-            //    _inReplyToMsgId = msg.ReplyToMessage.MessageId;
-            //}
+            if (world == null)
+            {
+                await SendMessage(msg.From.Id, "The bot is in no room, basic setup mode...");
 
-            var user = msg.From;
+                return;
+            }
 
-            UpdateUserData(user);
-
-            var player = GetUser(user.Id);
-
-            if (command.Admin && !player.IsAdmin)
+            if (command.Admin && !user.IsAdmin)
             {
                 return;
             }
 
-            Player targetedPlayer = null;
+            var player = GetStatus(user, world);
 
-            if (!isCommandPrivate && command.Targetable)
+            player.Message = msg;
+
+            Status targetedPlayer = null;
+
+            if (!isWorldPrivate && command.Targetable)
             {
                 if (args.Count == 0)
                 {
                     return;
                 }
 
-                targetedPlayer = ParseTarget(ref args);
+                targetedPlayer = ParseTarget(world, ref args);
 
                 if (targetedPlayer == null)
                 {
@@ -231,14 +262,24 @@ namespace FCGameBot
                 }
             }
 
-            if (!isCommandPrivate && chat.Type != ChatType.Channel)
+            if (!isWorldPrivate && chat.Type != ChatType.Channel)
             {
                 await RemoveMessage(msg);
             }
 
-            await Bot.SendChatActionAsync(isCommandPrivate ? user.Id : chat.Id, ChatAction.Typing);
+            await Bot.SendChatActionAsync(isWorldPrivate ? user.Id : chat.Id, ChatAction.Typing);
 
-            await command.Process(alias, args, chat, player, targetedPlayer);
+            await command.Process(alias, args, player, targetedPlayer);
+        }
+
+        private static async Task HandleHelp(Message msg, Queue<string> args)
+        {
+            if (msg.Chat.Type != ChatType.Private && msg.Chat.Type != ChatType.Channel)
+            {
+                await RemoveMessage(msg);
+            }
+
+            await SendMessage(msg.From.Id, "NothingV2...");
         }
 
         private static async Task HandleMessageChatMembersAdded(Message msg)
@@ -251,11 +292,11 @@ namespace FCGameBot
 
                 welcomeText.AppendLine($"Welcome `@{newUser.Username}` to The Fox Council world!");
 
-                await msg.Chat.Reply(welcomeText.ToString());
+                await SendMessage(msg.Chat.Id, welcomeText.ToString());
             }
         }
 
-        private static Player ParseTarget(ref Queue<string> args)
+        private static Status ParseTarget(World world, ref Queue<string> args)
         {
             var argsList = args.ToList();
             var usernameString = argsList.DequeueFirst(x => x.StartsWith('@')).Substring(1).ToLower();
@@ -267,42 +308,111 @@ namespace FCGameBot
 
             args = new Queue<string>(argsList);
 
-            return Players.FindOne(x => x.Username.ToLower().Equals(usernameString));
+            var user = Users.FindOne(x => x.Username.ToLower().Equals(usernameString));
+
+            return user == null ? null : GetStatus(user, world);
         }
 
-        private static void UpdateUserData(User user)
-        {
-            var player = GetUser(user.Id);
+        #region Status Methods
 
-            if (player == null)
+        private static Status GetStatus(User user, World world)
+        {
+            var status = Statuses
+                             .Include(x => x.User)
+                             .Include(x => x.World)
+                             .FindOne(x => x.User.Id == user.Id && x.World.Id == world.Id) ?? new Status(user, world);
+
+            status.World.Chat = world.Chat;
+
+            return status;
+        }
+
+        #endregion
+
+        #region World Methods
+
+        private static World UpdateWorldData(Chat chat)
+        {            
+            if (chat.Type == ChatType.Private)
             {
-                player = new Player
+                throw new Exception("Oops");
+            }
+
+            var world = GetWorld(chat);
+
+            Worlds.Upsert(world);
+
+            return world;
+        }
+
+        private static World GetWorld(Chat chat)
+        {
+            var world = GetWorldById(chat.Id);
+
+            if (world == null)
+            {
+                return new World(chat);
+            }
+
+            world.Title = chat.Title;
+            world.Type = chat.Type.ToString();
+
+            return world;
+        }
+
+        private static World GetWorldById(long chatId)
+        {
+            return Worlds.FindOne(Query.EQ("_id", chatId));
+        }
+
+        #endregion
+
+        #region User Methods
+
+        private static User UpdateUserData(TelegramUser telegramUser, Chat chat = null)
+        {
+            var user = GetUser(telegramUser, chat);
+
+            Users.Upsert(user);
+
+            return user;
+        }
+
+        private static User GetUser(TelegramUser telegramUser, Chat chat = null)
+        {
+            var user = GetUserById(telegramUser.Id);
+
+            if (user == null)
+            {
+                var newUser = new User(telegramUser);
+
+                if (chat != null && chat.Type != ChatType.Private)
                 {
-                    Id = user.Id,
-                    Firstname = user.FirstName,
-                    Lastname = user.LastName,
-                    Username = user.Username,
-                    LanguageCode = user.LanguageCode,
-                    Actions = 10,
-                    Credits = 20000,
-                    Health = 100,
-                    Weight = 75
-                };
+                    newUser.SelectedWorld = chat.Id;
+                }
+
+                return newUser;
             }
-            else
+
+            user.Firstname = telegramUser.FirstName;
+            user.Lastname = telegramUser.LastName;
+            user.Username = telegramUser.Username;
+            user.LanguageCode = telegramUser.LanguageCode;
+
+            if (user.SelectedWorld == 0 && chat != null && chat.Type != ChatType.Private)
             {
-                player.Firstname = user.FirstName;
-                player.Lastname = user.LastName;
-                player.Username = user.Username;
-                player.LanguageCode = user.LanguageCode;
+                // Default Selected World
+                user.SelectedWorld = chat.Id;
             }
 
-            Players.Upsert(player);
+            return user;
         }
 
-        private static Player GetUser(int userId)
+        private static User GetUserById(long chatId)
         {
-            return Players.FindOne(Query.EQ("_id", userId));
+            return Users.FindOne(Query.EQ("_id", chatId));
         }
+
+        #endregion
     }
 }

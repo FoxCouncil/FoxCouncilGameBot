@@ -1,8 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using Telegram.Bot.Types;
+using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,27 +19,27 @@ namespace FCGameBot.Commands
 
         public string[] GetNames() => new[] { "delete", "del", "rm" };
 
-        public async Task Help(string alias, Queue<string> args, Player player)
+        public async Task Help(string alias, Queue<string> args, Status player)
         {
-            throw new NotImplementedException();
+            await player.SendMessage("Nothing...");
         }
 
-        public async Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null)
+        public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
             if (args.TryDequeue(out var action))
             {
-                if (action.ToLower() == "player")
+                if (action.ToLower() == "user")
                 {
-                    if (target == null)
+                    if (targetPlayer == null)
                     {
-                        await player.SendMessage("Sorry, you need to target a player to delete!");
+                        await player.SendMessage("Sorry, you need to target a user to delete!");
                     }
                     else
                     {
-                        var removed = Game.Players.Delete(x => x.Id == target.Id);
+                        var removed = Game.Users.Delete(x => x.Id == player.User.Id);
                         await player.SendMessage(removed > 0
-                            ? $"Player {target.Username} was deleted successfully!"
-                            : $"Could not delete player {target.Username}!");
+                            ? $"User {player.User.Username} was deleted successfully!"
+                            : $"Could not delete user {player.User.Username}!");
 
                         return;
                     }

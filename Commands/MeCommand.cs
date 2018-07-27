@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using Telegram.Bot.Types;
+using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -19,14 +21,14 @@ namespace FCGameBot.Commands
 
         public string[] GetNames() => new [] { "me" };
 
-        public Task Help(string alias, Queue<string> args, Player player)
+        public Task Help(string alias, Queue<string> args, Status player)
         {
             throw new NotImplementedException();
         }
 
-        public async Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null)
+        public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
-            await chat.Reply($"``` * {player.Username} {string.Join(' ', args)}```");
+            await player.SendMessage($"``` * {player.Username} {string.Join(' ', args)}```");
         }
     }
 }

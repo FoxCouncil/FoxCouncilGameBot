@@ -52,10 +52,5 @@ namespace FCGameBot
         {
             return $"*{string.Format("{0:n0}", val)}*`{tag.ToUpper()}`";
         }
-
-        public static async Task Reply(this Chat chat, string msg)
-        {
-            await Game.SendMessage(chat.Id, msg);
-        }
     }
 }

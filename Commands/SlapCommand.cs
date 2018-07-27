@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using FCGameBot.Models;
 using Telegram.Bot.Types;
+using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,20 +20,20 @@ namespace FCGameBot.Commands
 
         public string[] GetNames() => new[] { "slap", "trout", "fishslap", "fish" };
 
-        public Task Help(string alias, Queue<string> args, Player player)
+        public Task Help(string alias, Queue<string> args, Status player)
         {
             throw new NotImplementedException();
         }
 
-        public async Task Process(string alias, Queue<string> args, Chat chat, Player player, Player target = null)
+        public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
-            if (player != null && player == target)
+            if (targetPlayer != null && player.Id == targetPlayer.Id)
             {
-                await chat.Reply($"`* {player.Username} slaps themselves in the face with a large trout.`");
+                await player.SendMessage($"`* {player.Username} slaps themselves in the face with a large trout.`");
             }
-            else if (player != null && target != null)
+            else if (player != null && targetPlayer != null)
             {
-                await chat.Reply($"`* {player.Username} slaps {target.Username} around a bit with a large trout.`");
+                await player.SendMessage($"`* {player.Username} slaps {targetPlayer.Username} around a bit with a large trout.`");
             }
         }
     }
