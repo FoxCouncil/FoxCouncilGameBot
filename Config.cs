@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;

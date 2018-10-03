@@ -1,13 +1,14 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using LiteDB;
 using Telegram.Bot.Types;
-using TelegramUser = Telegram.Bot.Types.User;
 
 namespace FCGameBot.Models
 {
-    internal class User : IEquatable<User>
+    internal class Player : IEquatable<Player>
     {
         public int Id { get; set; }
 
@@ -24,12 +25,12 @@ namespace FCGameBot.Models
         [BsonIgnore]
         public bool IsAdmin => Config.Data.Admins.Contains(Id);
 
-        public User()
+        public Player()
         {
 
         }
 
-        public User(TelegramUser telegramUser)
+        public Player(User telegramUser)
         {
             Id = telegramUser.Id;
             Firstname = telegramUser.FirstName;
@@ -38,16 +39,21 @@ namespace FCGameBot.Models
             LanguageCode = telegramUser.LanguageCode;
         }
 
-        #region IEquatable<User>
+        public async Task SendMessage(string msg)
+        {
+            await Game.SendMessage(Id, msg);
+        }
+
+        #region IEquatable<Player>
 
         public override bool Equals(object obj)
         {
             if (obj is null) return false;
             if (ReferenceEquals(this, obj)) return true;
-            return obj.GetType() == GetType() && Equals((User)obj);
+            return obj.GetType() == GetType() && Equals((Player)obj);
         }
 
-        public bool Equals(User other)
+        public bool Equals(Player other)
         {
             return other?.Id == Id;
         }
@@ -57,11 +63,11 @@ namespace FCGameBot.Models
             return Id;
         }
 
-        public static bool operator ==(User left, User right)
+        public static bool operator ==(Player left, Player right)
         {
             return left?.Id == right?.Id;
         }
-        public static bool operator !=(User left, User right)
+        public static bool operator !=(Player left, Player right)
         {
             return left?.Id != right?.Id;
         }

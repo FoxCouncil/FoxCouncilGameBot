@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,15 +14,15 @@ namespace FCGameBot.Models
     {
         public long Id { get; set; }
 
-        public User User { get; set; }
+        public Player Player { get; set; }
 
         public World World { get; set; }
 
         // Helpers
         [BsonIgnore] public Message Message { get; set; }
-        [BsonIgnore] public object Username => User.Username;
-        [BsonIgnore] public object Firstname => User.Firstname;
-        [BsonIgnore] public object Lastname => User.Lastname;
+        [BsonIgnore] public object Username => Player.Username;
+        [BsonIgnore] public object Firstname => Player.Firstname;
+        [BsonIgnore] public object Lastname => Player.Lastname;
 
         // Data
         public ushort Actions { get; set; }
@@ -40,36 +42,29 @@ namespace FCGameBot.Models
 
         }
 
-        public Status(User user, World world)
+        public Status(Player player, World world)
         {
-            User = user;
+            Player = player;
             World = world;
 
-            // TODO: Defaults from the world
+            if (World.Type != ChatType.Private.ToString())
+            {
+                // TODO: Defaults from the world
 
-            Id = Game.Statuses.Insert(this);
+                Id = Game.Statuses.Insert(this);
+            }
         }
 
         public async Task SendMessage(string msg)
         {
             if (World.Chat.Type == ChatType.Private)
             {
-                await SendPrivateMessage(msg);
+                await Player.SendMessage(msg);
             }
             else
             {
-                await SendWorldMessage(msg);
+                await World.SendMessage(msg);
             }
-        }
-
-        public async Task SendWorldMessage(string msg)
-        {
-            await Game.SendMessage(World.Id, msg);
-        }
-
-        public async Task SendPrivateMessage(string msg)
-        {
-            await Game.SendMessage(User.Id, msg);
         }
 
         public void Save()
@@ -93,7 +88,7 @@ namespace FCGameBot.Models
 
         public override string ToString()
         {
-            return $"[{Username}({User.Id}) in \"{World.Type}: {World.Title}({World.Id})\"]({Id})";
+            return $"[{Username}({Player.Id}) in \"{World.Type}: {World.Title}({World.Id})\"]({Id})";
         }
 
         #region IEquatable<Status>
@@ -102,7 +97,7 @@ namespace FCGameBot.Models
         {
             if (ReferenceEquals(null, other)) return false;
             if (ReferenceEquals(this, other)) return true;
-            return Equals(User, other.User) && Equals(World, other.World);
+            return Equals(Player, other.Player) && Equals(World, other.World);
         }
 
         public override bool Equals(object obj)
@@ -118,7 +113,7 @@ namespace FCGameBot.Models
             unchecked
             {
                 // ReSharper disable all NonReadonlyMemberInGetHashCode
-                return ((User != null ? User.GetHashCode() : 0) * 397) ^ (World != null ? World.GetHashCode() : 0);
+                return ((Player != null ? Player.GetHashCode() : 0) * 397) ^ (World != null ? World.GetHashCode() : 0);
             }
         }
 

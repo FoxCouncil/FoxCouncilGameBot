@@ -1,10 +1,11 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using FCGameBot.Models;
 using Telegram.Bot.Types;
-using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,11 +19,11 @@ namespace FCGameBot.Commands
 
         public bool Targetable { get; } = true;
 
-        public string[] GetNames() => new[] { "slap", "trout", "fishslap", "fish" };
+        public string[] Names { get; } = { "slap", "trout", "fishslap", "fish" };
 
-        public Task Help(string alias, Queue<string> args, Status player)
+        public async Task Help(Queue<string> args, Player player)
         {
-            throw new NotImplementedException();
+            await player.SendMessage("Nothing...");
         }
 
         public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
@@ -35,6 +36,11 @@ namespace FCGameBot.Commands
             {
                 await player.SendMessage($"`* {player.Username} slaps {targetPlayer.Username} around a bit with a large trout.`");
             }
+        }
+
+        public async Task Callback(string data, Message msg, Player player)
+        {
+            return;
         }
     }
 }

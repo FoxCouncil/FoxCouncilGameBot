@@ -1,10 +1,11 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using FCGameBot.Models;
 using Telegram.Bot.Types;
-using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,9 +19,9 @@ namespace FCGameBot.Commands
 
         public bool Targetable { get; } = false;
 
-        public string[] GetNames() => new[] { "ping" };
+        public string[] Names { get; } = { "ping" };
 
-        public async Task Help(string alias, Queue<string> args, Status player)
+        public async Task Help(Queue<string> args, Player player)
         {
             await player.SendMessage("Nothing...");
         }
@@ -28,6 +29,11 @@ namespace FCGameBot.Commands
         public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
             await player.SendMessage("Pong!");
+        }
+
+        public async Task Callback(string data, Message msg, Player player)
+        {
+            return;
         }
     }
 }

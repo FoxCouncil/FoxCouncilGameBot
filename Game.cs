@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,30 +8,51 @@ using FCGameBot.Models;
 using LiteDB;
 using Telegram.Bot;
 using Telegram.Bot.Args;
-using Telegram.Bot.Exceptions;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using User = FCGameBot.Models.User;
-using TelegramUser = Telegram.Bot.Types.User;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace FCGameBot
 {
+    #region Aliases
+
+    internal class InlineKeyboard : Dictionary<string, string> { }
+
+    internal class Callback : Tuple<Message, ICommand> { public Callback(Message item1, ICommand item2) : base(item1, item2) { } }
+
+    #endregion
+
     internal static class Game
     {
+        public const string Version = "0.1";
+
         private static readonly ManualResetEvent ResetEvent = new ManualResetEvent(false);
 
         /// <summary>List of every command available to the system.</summary>
         private static readonly Dictionary<string, ICommand> CommandHandlers = new Dictionary<string, ICommand>();
+        private static readonly HashSet<ICommand> Commands = new HashSet<ICommand>();
+
+        /// <summary>Keeps track of which command gets the callback messages.</summary>
+        private static readonly Dictionary<string, Callback> CallbackQueue = new Dictionary<string, Callback>();
+        private static readonly Dictionary<string, int> CallbackQueueCommands = new Dictionary<string, int>();
 
         /// <summary>The database object.</summary>
         public static LiteDatabase Database;
 
-        public static LiteCollection<User> Users;
+        // World Constructs
+        public static LiteCollection<Food> Foods;
+
+        public static LiteCollection<BankAccount> BankAccounts;
+        public static LiteCollection<BankTransaction> BankTransactions;
+
+        // Player State
+        public static LiteCollection<Player> Users;
         public static LiteCollection<World> Worlds;
         public static LiteCollection<Status> Statuses;
 
+        /// <summary>Telegram handlers</summary>
         public static TelegramBotClient Bot;
-        public static TelegramUser BotUser;
+        public static User BotUser;
 
         public static void Run()
         {
@@ -48,17 +67,79 @@ namespace FCGameBot
             Config.Save();
         }
 
-        public static async Task SendMessage(ChatId chatId, string message)
+        public static async Task SendMessage(Status playerStatus, string message)
         {
-            // Swallow exceptions from Telegram API being unable to telegramUser a particular user.
+            await SendMessage(playerStatus.Id, message);
+        }
+
+        public static async Task SendMessage(ChatId chatId, string message, int replyToMessageId = 0)
+        {
+            // Swallow exceptions from Telegram API being unable to telegramUser a particular player.
             try
             {
-                await Bot.SendTextMessageAsync(chatId, message, ParseMode.Markdown);
+                await Bot.SendTextMessageAsync(chatId, message, ParseMode.Markdown, replyToMessageId: replyToMessageId);
             }
             catch (Exception)
             {
                 /* ignored */
             }
+        }
+
+        public static async Task SendMessage(ChatId chatId, string message, Dictionary<string, string> inlineKeyboard, ICommand sourceCommand)
+        {
+            var commandKey = $"{chatId}-{sourceCommand.GetType()}";
+
+            if (CallbackQueueCommands.TryGetValue(commandKey, out var oldMessageId))
+            {
+                var oldMessageKey = $"{oldMessageId}-{chatId}";
+
+                if (CallbackQueue.TryGetValue(oldMessageKey, out var oldCallbackData))
+                {
+                    // Keep things clean
+                    await RemoveMessage(oldCallbackData?.Item1);
+
+                    CallbackQueue.Remove(oldMessageKey);
+                }
+
+                CallbackQueueCommands.Remove(commandKey);
+            }
+
+            Message newMessage = null;
+
+            // Swallow exceptions from Telegram API being unable to telegramUser a particular player.
+            try
+            {
+                newMessage = await Bot.SendTextMessageAsync(chatId, message, ParseMode.Markdown, replyMarkup: InlineKeyboardMarkupMaker(inlineKeyboard));
+            }
+            catch (Exception)
+            {
+                /* ignored */
+            }
+
+            if (newMessage is null)
+            {
+                throw new Exception("OMG, oh no....");
+            }
+
+            // Clean State
+            CallbackQueueCommands.Add(commandKey, newMessage.MessageId);
+            CallbackQueue.Add($"{newMessage.MessageId}-{chatId}", new Callback(newMessage, sourceCommand));
+        }
+
+        public static async Task<Message> EditMessage(Message msgToEdit, string newText, Dictionary<string, string> inlineKeyboard = null)
+        {
+            Message editedMessage = null;
+
+            try
+            {
+                editedMessage = await Bot.EditMessageTextAsync(msgToEdit.Chat.Id, msgToEdit.MessageId, newText, ParseMode.Markdown, true, InlineKeyboardMarkupMaker(inlineKeyboard));
+            }
+            catch (Exception)
+            {
+                /* ignored */
+            }
+
+            return editedMessage;
         }
 
         public static async Task RemoveMessage(Message msg)
@@ -74,6 +155,21 @@ namespace FCGameBot
             }
         }
 
+        public static World GetSelectedWorld(Status player)
+        {
+            return GetSelectedWorld(player.Player);
+        }
+
+        public static World GetSelectedWorld(Player player)
+        {
+            if (player.SelectedWorld == default(long))
+            {
+                return null;
+            }
+
+            return Worlds.FindOne(x => x.Authorized && x.Id == player.SelectedWorld);
+        }
+
         private static void InitCommands()
         {
             var commandTypes = AppDomain.CurrentDomain.GetAssemblies().SelectMany(s => s.GetTypes()).Where(p => typeof(ICommand).IsAssignableFrom(p)).Skip(1).ToArray();
@@ -81,7 +177,9 @@ namespace FCGameBot
             foreach (var handlerType in commandTypes)
             {
                 var newHandlerObj = (ICommand)Activator.CreateInstance(handlerType);
-                var newHandlerName = newHandlerObj.GetNames();
+                var newHandlerName = newHandlerObj.Names;
+
+                Commands.Add(newHandlerObj);
 
                 foreach (var alias in newHandlerName)
                 {
@@ -99,8 +197,25 @@ namespace FCGameBot
         {
             Database = new LiteDatabase(Config.Data.DatabaseFilename);
 
-            // User Collection
-            Users = Database.GetCollection<User>("users");
+            // Food Collection
+            Foods = Database.GetCollection<Food>("foods");
+            Foods.EnsureIndex(x => x.Id);
+            Foods.EnsureIndex(x => x.Name);
+            Foods.EnsureIndex(x => x.NamePlural);
+            Foods.EnsureIndex(x => x.IsHealthy);
+
+            // Bank Accounts Collection
+            BankAccounts = Database.GetCollection<BankAccount>("bank_accounts");
+            BankAccounts.EnsureIndex(x => x.Id);
+            BankAccounts.EnsureIndex(x => x.OwnerId);
+
+            // Bank Transactions Collection
+            BankTransactions = Database.GetCollection<BankTransaction>("bank_transactions");
+            BankTransactions.EnsureIndex(x => x.Id);
+            BankTransactions.EnsureIndex(x => x.AccountId);
+
+            // Player Collection
+            Users = Database.GetCollection<Player>("players");
             Users.EnsureIndex(x => x.Id);
             Users.EnsureIndex(x => x.Username);
 
@@ -108,12 +223,13 @@ namespace FCGameBot
             Worlds = Database.GetCollection<World>("worlds");
             Worlds.EnsureIndex(x => x.Id);
 
+            // Status Collection
             Statuses = Database.GetCollection<Status>("statuses");
-            Statuses.EnsureIndex(x => x.User);
+            Statuses.EnsureIndex(x => x.Player);
             Statuses.EnsureIndex(x => x.World);
 
+            BsonMapper.Global.Entity<Status>().DbRef(x => x.Player, "players");
             BsonMapper.Global.Entity<Status>().DbRef(x => x.World, "worlds");
-            BsonMapper.Global.Entity<Status>().DbRef(x => x.User, "users");
         }
 
         private static void InitTelegramBot()
@@ -122,7 +238,7 @@ namespace FCGameBot
             BotUser = Bot.GetMeAsync().Result;
 
             Bot.OnUpdate += OnUpdate;
-            Bot.StartReceiving(new [] { UpdateType.Message, UpdateType.EditedMessage });
+            Bot.StartReceiving(new[] { UpdateType.Message, UpdateType.EditedMessage, UpdateType.CallbackQuery });
         }
 
         private static async void OnUpdate(object sender, UpdateEventArgs e)
@@ -132,6 +248,27 @@ namespace FCGameBot
             if (update.Type == UpdateType.Message || update.Type == UpdateType.EditedMessage)
             {
                 await HandleUpdateMessage(update);
+            }
+            else if (update.Type == UpdateType.CallbackQuery)
+            {
+                await HandleCallbackQuery(update.CallbackQuery);
+            }
+        }
+
+        private static async Task HandleCallbackQuery(CallbackQuery callbackQuery)
+        {
+            var callbackKey = $"{callbackQuery.Message.MessageId}-{callbackQuery.From.Id}";
+
+            if (CallbackQueue.TryGetValue(callbackKey, out var callback))
+            {
+                var msg = callback.Item1;
+                var command = callback.Item2;
+
+                await command.Callback(callbackQuery.Data, callbackQuery.Message ?? msg, GetUser(callbackQuery.From));
+            }
+            else
+            {
+                await RemoveMessage(callbackQuery.Message);
             }
         }
 
@@ -191,9 +328,13 @@ namespace FCGameBot
             var isWorldPrivate = chat.Type == ChatType.Private;
 
             var user = UpdateUserData(msg.From, msg.Chat);
-            var world = isWorldPrivate ? GetWorldById(user.SelectedWorld) : UpdateWorldData(chat);
 
-            world.Chat = chat;
+            if (!isWorldPrivate)
+            {
+                UpdateWorldData(chat);
+            }
+
+            var world = isWorldPrivate ? new World(chat) : GetWorld(chat);
 
             // Ignore messages that don't start with a slash command.
             if (!msg.Text.StartsWith('/'))
@@ -212,7 +353,7 @@ namespace FCGameBot
 
             if (alias.Equals("help"))
             {
-                await HandleHelp(msg, args);
+                await HandleHelp(user, msg, args);
 
                 return;
             }
@@ -236,6 +377,8 @@ namespace FCGameBot
                 return;
             }
 
+            world.Chat = chat;
+
             if (command.Admin && !user.IsAdmin)
             {
                 return;
@@ -249,16 +392,9 @@ namespace FCGameBot
 
             if (!isWorldPrivate && command.Targetable)
             {
-                if (args.Count == 0)
+                if (args.Count != 0)
                 {
-                    return;
-                }
-
-                targetedPlayer = ParseTarget(world, ref args);
-
-                if (targetedPlayer == null)
-                {
-                    return;
+                    targetedPlayer = ParseTarget(world, ref args);
                 }
             }
 
@@ -272,14 +408,75 @@ namespace FCGameBot
             await command.Process(alias, args, player, targetedPlayer);
         }
 
-        private static async Task HandleHelp(Message msg, Queue<string> args)
+        private static async Task HandleHelp(Player player, Message msg, Queue<string> args)
         {
             if (msg.Chat.Type != ChatType.Private && msg.Chat.Type != ChatType.Channel)
             {
                 await RemoveMessage(msg);
             }
 
-            await SendMessage(msg.From.Id, "NothingV2...");
+            if (args.TryPeek(out var commandString) && CommandHandlers.ContainsKey(commandString.ToLower()))
+            {
+                await CommandHandlers[commandString.ToLower()].Help(args, player);
+
+                return;
+            }
+
+            const string adminTokenString = " [[ADMIN]]";
+
+            var helpText = new StringBuilder();
+
+            helpText.AppendLine($"The Fox Council Game - V{Version} - Help");
+
+            var globalCommands = Commands.Where(x =>
+                x.Private && x.Public && !x.Admin ||
+                x.Private && x.Public && x.Admin == player.IsAdmin
+            ).ToList();
+
+            if (globalCommands.Count != 0)
+            {
+                helpText.AppendLine();
+                helpText.AppendLine("**__Global__ Commands**:");
+
+                foreach (var command in globalCommands)
+                {
+                    helpText.AppendLine($"  /{command.Names[0]} - %%SHORTDESC%%{(command.Admin ? adminTokenString : string.Empty)}");
+                }
+            }
+
+            var worldCommands = Commands.Where(x =>
+                !x.Private && x.Public && !x.Admin ||
+                !x.Private && x.Public && x.Admin == player.IsAdmin
+            ).ToList();
+
+            if (worldCommands.Count != 0)
+            {
+                helpText.AppendLine();
+                helpText.AppendLine("**__World__ Commands**:");
+
+                foreach (var command in worldCommands)
+                {
+                    helpText.AppendLine($"  /{command.Names[0]} - %%SHORTDESC%%{(command.Admin ? adminTokenString : string.Empty)}");
+                }
+            }
+
+            var botCommands = Commands.Where(x =>
+                x.Private && !x.Public && !x.Admin ||
+                x.Private && !x.Public && x.Admin == player.IsAdmin
+            ).ToList();
+
+            if (botCommands.Count != 0)
+            {
+                helpText.AppendLine();
+                helpText.AppendLine("**__Bot__ Commands**:");
+
+                foreach (var command in botCommands)
+                {
+                    helpText.AppendLine($"  /{command.Names[0]} - %%SHORTDESC%%{(command.Admin ? adminTokenString : string.Empty)}");
+                }
+            }
+
+            await SendMessage(msg.From.Id, helpText.ToString());
         }
 
         private static async Task HandleMessageChatMembersAdded(Message msg)
@@ -294,6 +491,15 @@ namespace FCGameBot
 
                 await SendMessage(msg.Chat.Id, welcomeText.ToString());
             }
+        }
+
+        #region Helper Methods
+
+        private static InlineKeyboardMarkup InlineKeyboardMarkupMaker(Dictionary<string, string> items)
+        {
+            var ik = items.Select(item => new[] { InlineKeyboardButton.WithCallbackData(item.Value, item.Key) }).ToArray();
+
+            return new InlineKeyboardMarkup(ik);
         }
 
         private static Status ParseTarget(World world, ref Queue<string> args)
@@ -313,14 +519,13 @@ namespace FCGameBot
             return user == null ? null : GetStatus(user, world);
         }
 
+        #endregion
+
         #region Status Methods
 
-        private static Status GetStatus(User user, World world)
+        public static Status GetStatus(Player player, World world)
         {
-            var status = Statuses
-                             .Include(x => x.User)
-                             .Include(x => x.World)
-                             .FindOne(x => x.User.Id == user.Id && x.World.Id == world.Id) ?? new Status(user, world);
+            var status = Statuses.IncludeAll().FindOne(x => x.Player.Id == player.Id && x.World.Id == world.Id) ?? new Status(player, world);
 
             status.World.Chat = world.Chat;
 
@@ -331,18 +536,16 @@ namespace FCGameBot
 
         #region World Methods
 
-        private static World UpdateWorldData(Chat chat)
+        private static void UpdateWorldData(Chat chat)
         {            
             if (chat.Type == ChatType.Private)
             {
-                throw new Exception("Oops");
+                return;
             }
 
             var world = GetWorld(chat);
 
             Worlds.Upsert(world);
-
-            return world;
         }
 
         private static World GetWorld(Chat chat)
@@ -367,9 +570,9 @@ namespace FCGameBot
 
         #endregion
 
-        #region User Methods
+        #region Player Methods
 
-        private static User UpdateUserData(TelegramUser telegramUser, Chat chat = null)
+        private static Player UpdateUserData(User telegramUser, Chat chat = null)
         {
             var user = GetUser(telegramUser, chat);
 
@@ -378,13 +581,13 @@ namespace FCGameBot
             return user;
         }
 
-        private static User GetUser(TelegramUser telegramUser, Chat chat = null)
+        private static Player GetUser(User telegramUser, Chat chat = null)
         {
             var user = GetUserById(telegramUser.Id);
 
             if (user == null)
             {
-                var newUser = new User(telegramUser);
+                var newUser = new Player(telegramUser);
 
                 if (chat != null && chat.Type != ChatType.Private)
                 {
@@ -408,7 +611,7 @@ namespace FCGameBot
             return user;
         }
 
-        private static User GetUserById(long chatId)
+        private static Player GetUserById(long chatId)
         {
             return Users.FindOne(Query.EQ("_id", chatId));
         }

@@ -1,9 +1,7 @@
-﻿//   !!  // FCGameBot - World.cs
-// *.-". // Created: 2018-07-25 [11:22 PM]
-//  | |  // Copyright 2018 The Fox Council 
-// Modified by: Fox Diller on 2018-07-25 [11:22 PM]
+﻿// Copyright (c) 2018 The Fox Council
 
 using System;
+using System.Threading.Tasks;
 using LiteDB;
 using Telegram.Bot.Types;
 
@@ -16,6 +14,8 @@ namespace FCGameBot.Models
         public string Title { get; set; }
 
         public string Type { get; set; }
+
+        public bool Authorized { get; set; }
 
         [BsonIgnore]
         public Chat Chat { get; set; }
@@ -30,8 +30,20 @@ namespace FCGameBot.Models
             Chat = chat;
 
             Id = Chat.Id;
-            Title = Chat.Title;
+            Title = Chat.Title ?? Chat.Type.ToString();
             Type = Chat.Type.ToString();
+        }
+
+        public async Task SendMessage(string msg, Message reply = null)
+        {
+            if (reply is null)
+            {
+                await Game.SendMessage(Id, msg);
+            }
+            else
+            {
+                await Game.SendMessage(Id, msg, reply.MessageId);
+            }
         }
 
         public override string ToString()

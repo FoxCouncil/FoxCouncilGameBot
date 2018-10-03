@@ -1,0 +1,12 @@
+﻿extensions: designer.cs generated.cs
+extensions: .cs .cpp .h
+// Copyright (c) 2018 The Fox Council
+
+extensions: .aspx .ascx
+<%-- Copyright (c) 2018 The Fox Council --%>
+
+extensions: .vb
+'Copyright (c) 2018 The Fox Council
+
+extensions:  .xml .config .xsd .html .htm
+<!-- Copyright (c) 2018 The Fox Council -->

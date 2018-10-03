@@ -1,10 +1,11 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using FCGameBot.Models;
 using Telegram.Bot.Types;
-using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -18,17 +19,22 @@ namespace FCGameBot.Commands
 
         public bool Targetable { get; } = true;
 
-        public string[] GetNames() => new[] { "status" };
+        public string[] Names { get; } = { "status" };
 
-        public async Task Help(string alias, Queue<string> args, Status player)
+        public async Task Help(Queue<string> args, Player player)
         {
-            await player.SendMessage("Nothing...");
+            await Game.SendMessage(player.Id, "Nothing...");
         }
 
         public async Task Process(string alias, Queue<string> args, Status player, Status targetPlayer = null)
         {
             await player.SendMessage($"Credits: {player.Credits.N("💳")}");
-            await player.SendMessage($"Your language code is: {player.User.LanguageCode}");
+            await player.SendMessage($"Your language code is: {player.Player.LanguageCode}");
+        }
+
+        public async Task Callback(string data, Message msg, Player player)
+        {
+            return;
         }
     }
 }

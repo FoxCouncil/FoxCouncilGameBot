@@ -1,9 +1,10 @@
-﻿using System;
+﻿// Copyright (c) 2018 The Fox Council
+
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FCGameBot.Models;
 using Telegram.Bot.Types;
-using User = FCGameBot.Models.User;
 
 namespace FCGameBot.Commands
 {
@@ -17,9 +18,9 @@ namespace FCGameBot.Commands
 
         public bool Targetable { get; } = true;
 
-        public string[] GetNames() => new[] { "delete", "del", "rm" };
+        public string[] Names { get; } = { "delete", "del", "rm" };
 
-        public async Task Help(string alias, Queue<string> args, Status player)
+        public async Task Help(Queue<string> args, Player player)
         {
             await player.SendMessage("Nothing...");
         }
@@ -28,18 +29,18 @@ namespace FCGameBot.Commands
         {
             if (args.TryDequeue(out var action))
             {
-                if (action.ToLower() == "user")
+                if (action.ToLower() == "player")
                 {
                     if (targetPlayer == null)
                     {
-                        await player.SendMessage("Sorry, you need to target a user to delete!");
+                        await player.SendMessage("Sorry, you need to target a player to delete!");
                     }
                     else
                     {
-                        var removed = Game.Users.Delete(x => x.Id == player.User.Id);
+                        var removed = Game.Users.Delete(x => x.Id == player.Player.Id);
                         await player.SendMessage(removed > 0
-                            ? $"User {player.User.Username} was deleted successfully!"
-                            : $"Could not delete user {player.User.Username}!");
+                            ? $"Player {player.Player.Username} was deleted successfully!"
+                            : $"Could not delete player {player.Player.Username}!");
 
                         return;
                     }
@@ -47,6 +48,11 @@ namespace FCGameBot.Commands
             }
 
             await player.SendMessage("Invalid syntax.");
+        }
+
+        public async Task Callback(string data, Message msg, Player player)
+        {
+            return;
         }
     }
 }
